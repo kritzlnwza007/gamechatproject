@@ -218,7 +218,7 @@ def main():
         layout="wide"
     )
 
-    st.title("🎮 Game Chat Assistant — Powered by Steam API + Web Search")
+    st.title("🎮 Game Chat Assistant")
 
     init_session_state()
 
