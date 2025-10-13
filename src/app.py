@@ -1,4 +1,11 @@
+"""
+Chat Application with Web Search Tool Calling
+Demonstrates function calling with web search capabilities
+"""
+# main
+
 import streamlit as st
+
 import sys
 import os
 import json
@@ -18,6 +25,7 @@ from utils.search_tools import WebSearchTool, format_search_results
 from utils.steam_api import SteamAPI
 
 
+
 # ------------------------------------------------------------
 # 📁 Memory Path
 # ------------------------------------------------------------
@@ -29,15 +37,23 @@ MEMORY_FILE = MEMORY_DIR / "chat_memory.json"
 # 💾 Memory Functions
 # ------------------------------------------------------------
 def load_memory():
-    """โหลดประวัติแชตจากไฟล์"""
-    if MEMORY_FILE.exists():
-        try:
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
+    """Load chat memory if file exists, but clear on new session"""
+    memory_file = Path("data/chat_memory.json")
 
+    # ถ้ามีการรันใหม่ (session ใหม่) → ลบไฟล์เก่าเลย
+    if not st.session_state.get("initialized", False):
+        if memory_file.exists():
+            memory_file.unlink()  # ลบไฟล์
+        st.session_state.initialized = True  # ตั้ง flag ว่าถูกเริ่มแล้ว
+
+    # โหลดไฟล์ใหม่ถ้ามี (หลังจากลบแล้วก็จะไม่มี)
+    if memory_file.exists():
+        with open(memory_file, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
+    return []
 
 def save_memory(messages):
     """บันทึกประวัติแชตลงไฟล์"""
@@ -130,6 +146,11 @@ def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]
     # 🎮 ถ้ามีชื่อเกมและถามเรื่องราคา → Steam API
     if game_name and any(k in message_lower for k in price_keywords):
         steam_info = get_steam_game_info(game_name)
+        
+         # แปลง "N/A" → "Free" และใช้ Markdown-friendly line breaks
+        steam_info = steam_info.replace("ราคา: N/A", "ราคา: Free")
+        steam_info = steam_info.replace("\n", "  \n")  # Markdown: 2 spaces + \n = new line
+
         enhanced_prompt = f"""
 ผู้ใช้ถามเกี่ยวกับราคาเกม: {message_content}
 
@@ -261,4 +282,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
