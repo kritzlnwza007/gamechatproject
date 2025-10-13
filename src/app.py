@@ -218,7 +218,15 @@ def main():
         layout="wide"
     )
 
-    st.title("🎮 Game Chat Assistant")
+    st.markdown(
+    """
+    <h1 style='text-align: center;'>
+        🎮 Game Chat Assistant
+    </h1>
+    """,
+    unsafe_allow_html=True
+)
+
 
     init_session_state()
 
