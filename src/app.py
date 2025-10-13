@@ -1,22 +1,12 @@
-"""
-Chat Application with Web Search Tool Calling
-Demonstrates function calling with web search capabilities
-"""
-# main
-
 import streamlit as st
-
 import sys
 import os
 import json
 from pathlib import Path
 from typing import Tuple
 from dotenv import load_dotenv
-
-# โหลด environment variables (รวมถึง STEAM_API_KEY)
 load_dotenv()
 
-# Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -25,28 +15,20 @@ from utils.search_tools import WebSearchTool, format_search_results
 from utils.steam_api import SteamAPI
 
 
-
-# ------------------------------------------------------------
-# 📁 Memory Path
-# ------------------------------------------------------------
 MEMORY_DIR = Path("data")
 MEMORY_FILE = MEMORY_DIR / "chat_memory.json"
 
-
-# ------------------------------------------------------------
-# 💾 Memory Functions
-# ------------------------------------------------------------
 def load_memory():
     """Load chat memory if file exists, but clear on new session"""
     memory_file = Path("data/chat_memory.json")
 
-    # ถ้ามีการรันใหม่ (session ใหม่) → ลบไฟล์เก่าเลย
+    #ถ้ามีการรันใหม่
     if not st.session_state.get("initialized", False):
         if memory_file.exists():
-            memory_file.unlink()  # ลบไฟล์
-        st.session_state.initialized = True  # ตั้ง flag ว่าถูกเริ่มแล้ว
+            memory_file.unlink()
+        st.session_state.initialized = True
 
-    # โหลดไฟล์ใหม่ถ้ามี (หลังจากลบแล้วก็จะไม่มี)
+    #หลดไฟล์ใหม่
     if memory_file.exists():
         with open(memory_file, "r", encoding="utf-8") as f:
             try:
@@ -67,10 +49,6 @@ def clear_memory():
     if MEMORY_FILE.exists():
         MEMORY_FILE.unlink()
 
-
-# ------------------------------------------------------------
-# 🔧 INITIALIZATION
-# ------------------------------------------------------------
 def init_session_state():
     """Initialize Streamlit session state"""
     if "messages" not in st.session_state:
@@ -89,10 +67,6 @@ def init_session_state():
     if "search_api" not in st.session_state:
         st.session_state.search_api = "serper"
 
-
-# ------------------------------------------------------------
-# 🎮 Steam Game Info (ใช้ API จริง)
-# ------------------------------------------------------------
 def get_steam_game_info(game_name: str) -> str:
     """ดึงข้อมูลเกมจริงจาก Steam"""
     appid = SteamAPI.search_game(game_name)
@@ -105,10 +79,6 @@ def get_steam_game_info(game_name: str) -> str:
 
     return "⚠️ ไม่สามารถดึงข้อมูลเกมจาก Steam ได้."
 
-
-# ------------------------------------------------------------
-# 🔍 HANDLE TOOL CALLS
-# ------------------------------------------------------------
 def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]:
     """
     วิเคราะห์ข้อความของผู้ใช้:
@@ -121,7 +91,7 @@ def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]
 
     message_lower = message_content.lower()
 
-    # 🔹 คีย์เวิร์ดต่าง ๆ
+    #คีย์เวิร์ด
     game_name_keywords = [
         "gta", "fortnite", "valorant", "call of duty", "cod", "pubg",
         "elden ring", "cyberpunk", "palworld", "counter strike", "cs2",
@@ -136,20 +106,18 @@ def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]
         "most played", "update", "news", "ออกใหม่", "เปิดตัว", "เกมใหม่"
     ]
 
-    # 🔎 ตรวจจับชื่อเกม
+    #ตรวจจับชื่อเกม
     game_name = None
     for g in game_name_keywords:
         if g in message_lower:
             game_name = g
             break
 
-    # 🎮 ถ้ามีชื่อเกมและถามเรื่องราคา → Steam API
     if game_name and any(k in message_lower for k in price_keywords):
         steam_info = get_steam_game_info(game_name)
         
-         # แปลง "N/A" → "Free" และใช้ Markdown-friendly line breaks
         steam_info = steam_info.replace("ราคา: N/A", "ราคา: Free")
-        steam_info = steam_info.replace("\n", "  \n")  # Markdown: 2 spaces + \n = new line
+        steam_info = steam_info.replace("\n", "  \n") 
 
         enhanced_prompt = f"""
 ผู้ใช้ถามเกี่ยวกับราคาเกม: {message_content}
@@ -159,7 +127,6 @@ def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]
 """
         return enhanced_prompt, True
 
-    # 🧠 ถ้ามีชื่อเกมแต่เป็นคำถามทั่วไป → ให้ LLM อธิบายเอง
     if game_name and any(k in message_lower for k in general_game_keywords):
         enhanced_prompt = f"""
 ผู้ใช้ถามเกี่ยวกับเกม: {message_content}
@@ -169,7 +136,7 @@ def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]
 """
         return enhanced_prompt, False
 
-    # 🌐 ถามเรื่องแนวโน้ม / อันดับ / ข่าว → ใช้ Web Search
+    #ถามเรื่องทั่วไปของเกม
     if any(trigger in message_lower for trigger in search_triggers):
         query = message_content
         search_results = execute_search(query, 5)
@@ -183,23 +150,14 @@ I searched the web and found:
 """
         return enhanced_prompt, True
 
-    # 🔸 ถ้าไม่เข้าเงื่อนไขใดเลย → ใช้ LLM ปกติ
+    #ถ้าไม่เข้าเงื่อนไขใดเลย
     return message_content, False
 
-
-
-# ------------------------------------------------------------
-# 🌐 SEARCH FUNCTION
-# ------------------------------------------------------------
 def execute_search(query: str, num_results: int = 5):
     api = st.session_state.get("search_api", "serper")
     results = st.session_state.search_tool.search(query, num_results, preferred_api=api)
     return results
 
-
-# ------------------------------------------------------------
-# 💬 DISPLAY CHAT
-# ------------------------------------------------------------
 def display_chat_messages():
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -208,9 +166,6 @@ def display_chat_messages():
             st.markdown(message["content"])
 
 
-# ------------------------------------------------------------
-# 🧠 MAIN APP
-# ------------------------------------------------------------
 def main():
     st.set_page_config(
         page_title="🎮 Game & Info Chat Assistant",
@@ -218,15 +173,7 @@ def main():
         layout="wide"
     )
 
-    st.markdown(
-    """
-    <h1 style='text-align: center;'>
-        🎮 Game Chat Assistant
-    </h1>
-    """,
-    unsafe_allow_html=True
-    )
-
+    st.title("🎮 Game Chat Assistant — Powered by Steam API + Web Search")
 
     init_session_state()
 
@@ -235,8 +182,8 @@ def main():
         st.header("⚙️ Settings")
         available_models = get_available_models()
         selected_model = st.selectbox("Select Model", available_models, index=0)
-        temperature = st.slider("Temperature", 0.0, 2.0, 0.7, 0.1)
-        max_tokens = st.slider("Max Tokens", 50, 4000, 2000, 50)
+        # temperature = st.slider("Temperature", 0.0, 2.0, 0.7, 0.1)
+        # max_tokens = st.slider("Max Tokens", 50, 4000, 2000, 50)
 
         st.subheader("🔍 Search Settings")
         st.session_state.search_api = st.selectbox("Search API", ["serper", "tavily"], index=0)
@@ -246,8 +193,8 @@ def main():
             with st.spinner("Initializing..."):
                 st.session_state.llm_client = LLMClient(
                     model=selected_model,
-                    temperature=temperature,
-                    max_tokens=max_tokens
+                    # temperature=temperature,
+                    # max_tokens=max_tokens
                 )
             st.success("✅ Model initialized!")
 
@@ -278,7 +225,6 @@ def main():
                 enhanced_prompt, search_used = handle_tool_calls(prompt, st.session_state.llm_client)
                 response = enhanced_prompt
 
-                # ถ้าไม่ใช่ Steam หรือ Search → ใช้ LLM ตอบ
                 if not search_used:
                     messages = [{"role": msg["role"], "content": msg["content"]} for msg in st.session_state.messages[:-1]]
                     messages.append({"role": "user", "content": enhanced_prompt})
@@ -290,3 +236,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
