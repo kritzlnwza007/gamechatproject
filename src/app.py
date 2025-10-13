@@ -225,7 +225,7 @@ def main():
     </h1>
     """,
     unsafe_allow_html=True
-)
+    )
 
 
     init_session_state()
