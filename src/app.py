@@ -2,6 +2,7 @@ import streamlit as st
 import sys
 import os
 import json
+import random 
 from pathlib import Path
 from typing import Tuple
 from dotenv import load_dotenv
@@ -14,21 +15,42 @@ from utils.llm_client import LLMClient, get_available_models
 from utils.search_tools import WebSearchTool, format_search_results
 from utils.steam_api import SteamAPI
 
-
 MEMORY_DIR = Path("data")
 MEMORY_FILE = MEMORY_DIR / "chat_memory.json"
+
+REFUSALS_TH = [
+    "ผมตอบเฉพาะเรื่องเกมนะครับ 🙂 ลองถามชื่อเกม แนวเกม ราคา หรือสเปคได้เลย",
+    "โฟกัสที่เกมเท่านั้นน้าา 🎮 ลองถามเรื่อง GTA, Elden Ring, ราคา, DLC, รีวิวได้เลยครับ",
+    "ขอโทษนะครับ ผมตอบเฉพาะเรื่องเกม 🙏 ช่วยถามเกี่ยวกับเกมอีกครั้งได้ไหม",
+    "บอทนี้เป็นผู้ช่วยเรื่องเกมเท่านั้นจ้า 😅 ชวนคุยเรื่องเกมมาเลย เช่น ราคา/ข่าว/แนว",
+    "ขอจำกัดที่หัวข้อเกมเท่านั้นครับ 🤝 ถามเรื่องแพลตฟอร์ม ราคา หรือรีวิวเกมได้เลย",
+    "ขอเป็นเรื่องเกมเท่านั้นนะครับ 🎯 ลองถามชื่อเกมหรือแนวเกมที่สนใจดูได้เลย",
+]
+def random_refusal() -> str:
+    return random.choice(REFUSALS_TH)
+
+GAME_HINTS = [
+    "เกม","game","video game","steam","playstation","ps4","ps5",
+    "xbox","switch","nintendo","pc","mobile","android","ios",
+    "dlc","mod","patch","fps","rpg","moba","open world","survival",
+    "multiplayer","singleplayer","esports","rank","รีวิว","แนว","สเปค","ราคา",
+    "gta","elden ring","valorant","dota","lol","cs2","minecraft","roblox","cyberpunk",
+]
+def is_game_query(text: str) -> bool:
+    t = text.lower()
+    return any(k in t for k in GAME_HINTS)
 
 def load_memory():
     """Load chat memory if file exists, but clear on new session"""
     memory_file = Path("data/chat_memory.json")
 
-    #ถ้ามีการรันใหม่
+    # ถ้ามีการรันใหม่
     if not st.session_state.get("initialized", False):
         if memory_file.exists():
             memory_file.unlink()
         st.session_state.initialized = True
 
-    #หลดไฟล์ใหม่
+    # โหลดไฟล์ใหม่
     if memory_file.exists():
         with open(memory_file, "r", encoding="utf-8") as f:
             try:
@@ -42,7 +64,6 @@ def save_memory(messages):
     MEMORY_DIR.mkdir(exist_ok=True)
     with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         json.dump(messages, f, ensure_ascii=False, indent=2)
-
 
 def clear_memory():
     """ล้างหน่วยความจำ"""
@@ -80,25 +101,19 @@ def get_steam_game_info(game_name: str) -> str:
     return "⚠️ ไม่สามารถดึงข้อมูลเกมจาก Steam ได้."
 
 def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]:
-    """
-    วิเคราะห์ข้อความของผู้ใช้:
-    - ถามทั่วไป (รู้จักไหม / คืออะไร / แนวเกมอะไร) → ใช้ LLM ปกติ
-    - ถามเรื่องราคา / การขาย → ใช้ Steam API
-    - ถามแนวกว้าง (top games, เกมมาแรง) → ใช้ Web Search
-    """
     if llm_client is None:
         return message_content, False
 
     message_lower = message_content.lower()
 
-    #คีย์เวิร์ด
+    # คีย์เวิร์ด
     game_name_keywords = [
         "gta", "fortnite", "valorant", "call of duty", "cod", "pubg",
         "elden ring", "cyberpunk", "palworld", "counter strike", "cs2",
         "roblox", "minecraft", "overwatch", "apex", "dota", "league of legends",
         "lol", "genshin", "starfield", "battlefield", "red dead", "hollow knight"
     ]
-    price_keywords = ["ราคา", "price", "ลดราคา", "sale", "discount", "cost", "ซื้อ", "steam"]
+    steam_keywords = ["ราคา", "price", "ลดราคา", "sale", "discount", "cost", "ซื้อ", "steam", "ข้อมูล", "เพิ่มเติม", "สนใจ", "download","โหลด","โหลดได้ที่ไหน","ดาวน์โหลด","download link"]
     general_game_keywords = ["คืออะไร", "รู้จัก", "แนว", "เกี่ยวกับ", "review", "รีวิว", "สนุกไหม", "ดีไหม"]
 
     search_triggers = [
@@ -113,20 +128,20 @@ def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]
             game_name = g
             break
 
-    if game_name and any(k in message_lower for k in price_keywords):
+    #ราคา
+    if game_name and any(k in message_lower for k in steam_keywords):
         steam_info = get_steam_game_info(game_name)
-        
-        steam_info = steam_info.replace("ราคา: N/A", "ราคา: Free")
-        steam_info = steam_info.replace("\n", "  \n") 
+        steam_info = steam_info.replace("ราคา: N/A", "ราคา: Free").replace("\n", "  \n")
 
-        enhanced_prompt = f"""
-ผู้ใช้ถามเกี่ยวกับราคาเกม: {message_content}
+        final_answer = f"""\
+🟨 **นี่คือข้อมูลของเกม:**
 
-ข้อมูลล่าสุดจาก Steam API:
 {steam_info}
+    <-- หากสนใจสามารถกด Link นี้ได้ครับ 
 """
-        return enhanced_prompt, True
-
+        return final_answer, True
+    
+    # อธิบายเกมllmตอบ
     if game_name and any(k in message_lower for k in general_game_keywords):
         enhanced_prompt = f"""
 ผู้ใช้ถามเกี่ยวกับเกม: {message_content}
@@ -136,10 +151,9 @@ def handle_tool_calls(message_content: str, llm_client=None) -> Tuple[str, bool]
 """
         return enhanced_prompt, False
 
-    #ถามเรื่องทั่วไปของเกม
+    #คำถามที่ไม่เกี่ยวกับราคา
     if any(trigger in message_lower for trigger in search_triggers):
-        query = message_content
-        search_results = execute_search(query, 5)
+        search_results = execute_search(message_content, 5)
         enhanced_prompt = f"""
 User Query: {message_content}
 
@@ -150,7 +164,7 @@ I searched the web and found:
 """
         return enhanced_prompt, True
 
-    #ถ้าไม่เข้าเงื่อนไขใดเลย
+    # ไม่เข้าเงื่อนไข ให้ไปที่ llm
     return message_content, False
 
 def execute_search(query: str, num_results: int = 5):
@@ -164,7 +178,6 @@ def display_chat_messages():
             if message.get("search_used", False):
                 st.markdown("🔍 *Used search or Steam API*")
             st.markdown(message["content"])
-
 
 def main():
     st.set_page_config(
@@ -182,16 +195,13 @@ def main():
     unsafe_allow_html=True
     )
 
-
     init_session_state()
 
-    # Sidebar Configuration
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ Settings")
         available_models = get_available_models()
         selected_model = st.selectbox("Select Model", available_models, index=0)
-        # temperature = st.slider("Temperature", 0.0, 2.0, 0.7, 0.1)
-        # max_tokens = st.slider("Max Tokens", 50, 4000, 2000, 50)
 
         st.subheader("🔍 Search Settings")
         st.session_state.search_api = st.selectbox("Search API", ["serper", "tavily"], index=0)
@@ -199,11 +209,7 @@ def main():
         st.divider()
         if st.button("🧠 Initialize Model"):
             with st.spinner("Initializing..."):
-                st.session_state.llm_client = LLMClient(
-                    model=selected_model,
-                    # temperature=temperature,
-                    # max_tokens=max_tokens
-                )
+                st.session_state.llm_client = LLMClient(model=selected_model)
             st.success("✅ Model initialized!")
 
         if st.button("🗑️ Clear Chat"):
@@ -216,32 +222,66 @@ def main():
             st.session_state.messages = []
             st.rerun()
 
-    # Display Chat
+    # Display history
     display_chat_messages()
 
     prompt = st.chat_input("Ask about any game or topic... 🎮")
 
     if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        save_memory(st.session_state.messages)
-
+        #ข้อข่าวล่าสุด
         with st.chat_message("user"):
             st.markdown(prompt)
+
+        #ถ้ามันไม่ใช่เรื่องเกม ให้จบ
+        if not is_game_query(prompt):
+            refusal = random_refusal()
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.messages.append({"role": "assistant", "content": refusal, "search_used": False})
+            save_memory(st.session_state.messages)
+
+            with st.chat_message("assistant"):
+                st.markdown(refusal)
+            st.stop()
+
+        # เพิ่มลง history หลังผ่าน gatekeeper
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        save_memory(st.session_state.messages)
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 enhanced_prompt, search_used = handle_tool_calls(prompt, st.session_state.llm_client)
                 response = enhanced_prompt
 
+                # promptบอก Ai
+                SYSTEM_PROMPT = """
+You are a professional Game Assistant 🎮.
+You must ONLY answer questions related to *video games*.
+Topics you can talk about include:
+- Game details (story, gameplay, mechanics, reviews, genres)
+- Platforms (PC, PlayStation, Xbox, Nintendo, Mobile)
+- Game recommendations, comparisons, or similar titles
+- Game prices, updates, DLCs, mods, esports, or hardware for gaming
+- Game industry news, trends, or game development concepts
+
+If the user asks about anything unrelated to games:
+Politely refuse in Thai with a short friendly sentence.
+"""
                 if not search_used:
-                    messages = [{"role": msg["role"], "content": msg["content"]} for msg in st.session_state.messages[:-1]]
-                    messages.append({"role": "user", "content": enhanced_prompt})
+                    history = [
+                        {"role": msg["role"], "content": msg["content"]}
+                        for msg in st.session_state.messages[:-1]
+                    ]
+                    messages = (
+                        [{"role": "system", "content": SYSTEM_PROMPT}]
+                        + history
+                        + [{"role": "user", "content": enhanced_prompt}]
+                    )
                     response = st.session_state.llm_client.chat(messages)
 
                 st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response, "search_used": search_used})
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": response, "search_used": search_used}
+                )
                 save_memory(st.session_state.messages)
-
 if __name__ == "__main__":
     main()
-
